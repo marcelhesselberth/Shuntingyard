@@ -61,11 +61,13 @@ def assert_array_close(actual, expected):
 # ───────────────────────────────────────────────
 
 @pytest.mark.parametrize("expr, expected_at_0", [
+    ("1+1", 2.0),
     ("2 + 3", 5.0),
     ("-5 + 7.5", 2.5),
     ("2 * -3", -6.0),
     ("2 ** 3 ** 2", 512.0),
     ("- - - -8", 8.0),
+    ("- ---8", 8.0),
     ("sin(pi/2)", 1.0),
     ("abs(-3.2)", 3.2),
     ("sqrt(16)", 4.0),
@@ -78,8 +80,8 @@ def assert_array_close(actual, expected):
     ("--abs(-5)", 5.0),
 ])
 def test_correct_expressions(parser, t_small, expr, expected_at_0):
-    postfix = parser.to_postfix(expr)
-    result = parser.evaluate(postfix, t_small)
+    parser.parse(expr)
+    result = parser.eval(t_small)
     assert_array_close(result[0], expected_at_0)
 
 
@@ -95,11 +97,11 @@ def test_correct_expressions(parser, t_small, expr, expected_at_0):
     (") + 5",            "Mismatched parentheses"),
 
     # Wrong number of function arguments
-    ("sin()",            "Missing argument(s) for function 'sin'"),
+    ("sin()",            "Missing argument(s) for 'sin'"),
     ("sin(1,2)",         "Invalid expression"),
-    ("pow(t)",           "Missing argument(s) for function 'pow'"),
-    ("pow(0.5)",      "Missing argument(s) for function 'pow'"),
-    ("pow()",   "Missing argument(s) for function 'pow'"),
+    ("pow(t)",           "Missing argument(s) for 'pow'"),
+    ("pow(0.5)",      "Missing argument(s) for 'pow'"),
+    ("pow()",   "Missing argument(s) for 'pow'"),
 
     # Syntax / missing operands
     ("3 + * 4",          "Missing left operand for '*'"),
@@ -117,15 +119,15 @@ def test_correct_expressions(parser, t_small, expr, expected_at_0):
     ("(1, 2)",           "Invalid expression"),
 
     # Malformed numbers — current tokenizer accepts many as variables → later fails
-    ("1.2.3",            "Invalid number or unknown variable: '1.2.3'"),
-    ("1e",               "Invalid number or unknown variable: '1e'"),
-    ("1e+",              "Invalid number or unknown variable: '1e+'"),
+    ("1.2.3",            "Expected operator before '.3'"),
+    ("1e",               "Expected operator before 'e'"),
+    ("1e+",              "Expected operator before 'e'"),
     ("e4",               "Unknown variable: 'e4'"),
 ])
 def test_error_cases_real_messages(parser, t_small, expr, expected_exc_msg_substring):
     with pytest.raises(ValueError) as exc_info:
-        postfix = parser.to_postfix(expr)
-        _ = parser.evaluate(postfix, t_small)
+        parser.parse(expr)
+        _ = parser.eval(t_small)
 
     assert expected_exc_msg_substring in str(exc_info.value)
 
@@ -141,8 +143,8 @@ def test_error_cases_real_messages(parser, t_small, expr, expected_exc_msg_subst
     "exp(1000)",
 ])
 def test_numerical_edges_no_exception(parser, t_small, expr):
-    postfix = parser.to_postfix(expr)
-    result = parser.evaluate(postfix, t_small)
+    parser.parse(expr)
+    result = parser.eval(t_small)
     assert len(result) == len(t_small)
     # We allow inf / nan
     assert np.all(np.isfinite(result) | np.isnan(result) | np.isinf(result))
@@ -154,8 +156,8 @@ def test_numerical_edges_no_exception(parser, t_small, expr):
 
 def test_empty_t_array(parser, t_empty):
     expr = "Vcc * sin(2 * pi * f * t + phase)"
-    postfix = parser.to_postfix(expr)
-    result = parser.evaluate(postfix, t_empty)
+    parser.parse(expr)
+    result = parser.eval(t_empty)
     assert result.shape == (0,)
     assert result.dtype.kind == 'f'
 
@@ -164,7 +166,7 @@ def test_empty_expression(parser, t_small):
     with pytest.raises(ValueError):
         # Current code returns zeros_like → but many would prefer error
         # If you want to make it raise → change evaluate when postfix empty
-        result = parser.evaluate([], t_small)
+        result = parser.eval([], t_small)
         assert np.all(result == 0)
 
 
@@ -175,8 +177,8 @@ def test_empty_expression(parser, t_small):
 def test_deep_nesting(parser, t_small):
     # ~20 levels — should be fine
     expr = "sin(" * 10 + "t" + ")" * 10
-    postfix = parser.to_postfix(expr)
-    result = parser.evaluate(postfix, t_small)
+    parser.parse(expr)
+    result = parser.eval(t_small)
     assert len(result) == len(t_small)
 
 
@@ -202,8 +204,8 @@ def test_deep_nesting(parser, t_small):
     ("pow(t, 1k)", 0.0),              # Meerdere argumenten met prefixes (bij t=0)
 ])
 def test_prefixes_correct(parser, t_small, expr, expected_val):
-    postfix = parser.to_postfix(expr)
-    result = parser.evaluate(postfix, t_small)
+    parser.parse(expr)
+    result = parser.eval(t_small)
     # Check de eerste waarde (t=0)
     assert_array_close(result[0], expected_val)
 
@@ -214,8 +216,8 @@ def test_prefixes_correct(parser, t_small, expr, expected_val):
 ])
 def test_scientific_vs_prefix(parser, t_small, expr, expected_at_0):
     # Deze test garandeert dat 'e' in 1e3 niet als variabele of prefix wordt gezien
-    postfix = parser.to_postfix(expr)
-    result = parser.evaluate(postfix, t_small)
+    parser.parse(expr)
+    result = parser.eval(t_small)
     assert_array_close(result[0], expected_at_0)
 
 
@@ -224,17 +226,17 @@ def test_scientific_vs_prefix(parser, t_small, expr, expected_at_0):
 # ───────────────────────────────────────────────
 
 @pytest.mark.parametrize("expr, expected_exc_msg_substring", [
-    ("10x", "Invalid number or unknown variable: '10x'"),      # 'x' is geen prefix
+    ("10x", "Expected operator before 'x'"),      # 'x' is geen prefix
     ("10 k", "Expected operator before 'k'"), # Spatie tussen getal en prefix (als k een var is)
     ("k10", "Unknown variable: 'k10'"),      # Prefix voor het getal
-    ("1mk", "Invalid number or unknown variable: '1mk'"),      # Dubbele prefix (niet toegestaan)
-    ("1e-3m", "Invalid number or unknown variable: '1e-3m'"),  # Prefix direct na exponent zonder spatie
-    ("1.0e3k", "Invalid number or unknown variable: '1.0e3k'"),  # Prefix direct na exponen
+    ("1mk", "Expected operator before 'k'"),      # Dubbele prefix (niet toegestaan)
+    ("1e-3m", "Expected operator before 'm'"),  # Prefix direct na exponent zonder spatie
+    ("1.0e3k", "Expected operator before 'k'"),  # Prefix direct na exponen
 ])
 def test_prefix_errors(parser, t_small, expr, expected_exc_msg_substring):
     with pytest.raises(ValueError) as exc_info:
-        postfix = parser.to_postfix(expr)
-        _ = parser.evaluate(postfix, t_small)
+        parser.parse(expr)
+        _ = parser.eval(t_small)
     assert expected_exc_msg_substring in str(exc_info.value)
 
 
@@ -246,15 +248,133 @@ def test_complex_prefix_expression(parser, t_small):
     # Expressie: Vcc (5) * sin(2 * pi * 50 * t) + 100m
     # Bij t=0: 5 * sin(0) + 0.1 = 0.1
     expr = "Vcc * sin(2 * pi * 50 * t) + 100m"
-    postfix = parser.to_postfix(expr)
-    result = parser.evaluate(postfix, t_small)
+    parser.parse(expr)
+    result = parser.eval(t_small)
     assert_array_close(result[0], 0.1)
 
 def test_prefix_in_pow(parser):
     # t=1000, exp=0.001
     t = np.array([1000, 0.001]) 
     expr = "pow(t, 0.01f)" 
-    postfix = parser.to_postfix(expr)
-    result = parser.evaluate(postfix, t)
+    parser.parse(expr)
+    result = parser.eval(t)
     assert result[0] == 1.0
 
+# ───────────────────────────────────────────────
+# Exponentiation & Unary tests – should succeed
+# ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("expr, expected_at_0", [
+    # Right-associativity of ** (2^(3^2))
+    ("2 ** 3 ** 2", 512.0),
+    ("3 ** 2 ** 3", 6561.0),
+    
+    # Power vs Unary binding: -2**2 should be -(2**2) = -4
+    ("-2 ** 2", -4.0),
+    ("(-2) ** 2", 4.0),
+    ("-3 ** -2", -0.1111111111111111), # -(3^-2)
+    
+    # Multiple unaries
+    ("---5", -5.0),
+    ("-+-5", 5.0),
+    ("2 * - - 3", 6.0),
+    
+    # Complex combinations
+    ("2 ** -3 ** 2", 1.953125e-03), # 2**(-(3**2)) = 2^-9
+    ("10 ** 3 / 1k", 1.0),
+    ("-(2+3)**2", -25.0),
+])
+def test_exponentiation_and_unaries(parser, t_small, expr, expected_at_0):
+    parser.parse(expr)
+    result = parser.eval(t_small)
+    assert_array_close(result[0], expected_at_0)
+
+
+# ───────────────────────────────────────────────
+# Error cases – Exponentiation & Unaries
+# ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("expr, expected_exc_msg_substring", [
+    # Missing operands for power
+    ("** 3",              "Missing left operand for '**'"),
+    ("2 **",              "Missing operand for '**'"),
+    ("2 ** * 3",          "Missing left operand for '*'"),
+    
+    # Incomplete unaries
+    ("5 + -",             "Missing operand for unary '-'"),
+    ("3 * +",             "Missing operand for unary '+'"),
+    
+    # Binary operators used as unary (other than +/-)
+    ("* 5",               "Missing left operand for '*'"),
+    ("/ 10",              "Missing left operand for '/'"),
+    
+    # Invalid combinations
+    ("2 ** ( )",          "Missing operand for '**'"),
+    ("pow(2, **3)",       "Missing left operand for '**'"),
+])
+def test_error_cases_ops(parser, t_small, expr, expected_exc_msg_substring):
+    with pytest.raises(ValueError) as exc_info:
+        parser.parse(expr)
+        _ = parser.eval(t_small)
+    assert expected_exc_msg_substring in str(exc_info.value)
+
+# ───────────────────────────────────────────────
+# Prefix & Exponentiation – should succeed
+# ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("expr, expected_at_0", [
+    ("1k ** 2", 1000000.0),           # (1000)^2
+    ("10m ** 3", 1e-6),              # (0.01)^3
+    ("2u ** -1", 500000.0),           # 1 / (2e-6)
+    
+    # Combinations with other ops
+    ("1k ** 2 / 1M", 1.0),            # 1,000,000 / 1,000,000
+    ("2 * 10k ** 2", 200000000.0),    # 2 * (10000^2)
+    
+    # Nested/Complex
+    ("(2k)**2", 4000000.0),
+    ("100m ** (1+1)", 0.01),          # (0.1)^2
+    
+    # Prefixes in both base and exponent (hoewel exponenten met prefix zeldzaam zijn)
+    ("2 ** 1000m", 2.0),              # 2^1 (1000m = 1)
+    ("4 ** 500m", 2.0),               # 4^0.5 = sqrt(4)
+])
+def test_prefix_exponentiation(parser, t_small, expr, expected_at_0):
+    parser.parse(expr)
+    result = parser.eval(t_small)
+    assert_array_close(result[0], expected_at_0)
+
+# ───────────────────────────────────────────────
+# Error cases – Prefix & Exponents
+# ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("expr, expected_exc_msg_substring", [
+    # Malformed prefixes near operators
+    ("1k* *2",            "Missing left operand for '*'"), # Spatie tussen **
+    ("1.k ** 2",          "Expected operator before 'k'"),
+    ("k1 ** 2",           "Unknown variable: 'k1'"),       # Prefix moet achter getal
+])
+def test_error_prefix_ops(parser, t_small, expr, expected_exc_msg_substring):
+    with pytest.raises(ValueError) as exc_info:
+        parser.parse(expr)
+        _ = parser.eval(t_small)
+    assert expected_exc_msg_substring in str(exc_info.value)
+    
+# ───────────────────────────────────────────────
+# Negative Prefixes & Exponents – should succeed
+# ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("expr, expected_at_0", [
+    ("-10k ** 2", -100000000.0),      # -(10000^2) = -1e8 (want macht bindt sterker)
+    ("(-10k) ** 2", 100000000.0),     # (-10000)^2 = 1e8
+    ("-2m ** 3", -8e-9),              # -(0.002^3) = -8e-9
+    ("(-2m) ** 3", -8e-9),             # (-0.002)^3 = -8e-9
+    # Combinaties met breuken en prefixes
+    ("-1u ** -2", -1e12),   # -1e12.
+    # Prefix in de exponent bij negatieve basis
+    ("(-2) ** 2000m", 4.0),           # (-2)^2 = 4
+])
+def test_negative_prefix_exponentiation(parser, t_small, expr, expected_at_0):
+    parser.parse(expr)
+    result = parser.eval(t_small)
+    assert_array_close(result[0], expected_at_0)
