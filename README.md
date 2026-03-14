@@ -1,5 +1,5 @@
 ### Shuntingyard
-Lightweight parser for small mathematical expressions, written in Python to avoid the need to use eval().
+Lightweight parser for mathematical expressions, written in Python to avoid the need to use eval().
 Uses Dijkstra's stack based infix-to-postfix translation algorithm.
 
 #### Features
