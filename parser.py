@@ -12,8 +12,9 @@ import numpy as np
 
 
 class ExpressionParser:
-    def __init__(self, variables=None):
+    def __init__(self, variables=None, default_var='t'):
         self.variables = variables or {}
+        self.default_var = default_var
         # SI Prefixes
         self.prefixes = {12: 'T', 9: 'G', 6: 'M', 3: 'k', 0: '', \
                          -3: 'm', -6: 'u', -9: 'n', -12: 'p', -15: 'f'}
@@ -34,6 +35,10 @@ class ExpressionParser:
             'pow': (2, np.power)
         }
         self.postfix = []
+        
+    
+    def add_function(self, name, f, arg_num):
+        self.funcs[name] = (arg_num, f)
 
 
     def tokenize(self, expr):
@@ -41,6 +46,7 @@ class ExpressionParser:
         # Pattern ensures SI prefixes are tied to numbers, otherwise they are variables
         pattern = r'\d*\.?\d+[eE][+-]?\d+|\d*\.?\d+[' + self.p_chars \
                 + r']?|[a-zA-Z_]\w*|\*\*|[+\-*/(),]'
+
         return re.findall(pattern, expr)
 
 
@@ -53,6 +59,7 @@ class ExpressionParser:
 
         for tok in tokens:
             # Number recognition
+            num_match = re.match(r'^(\d*\.?\d+)([' + self.p_chars + r'])?$', tok)
             if re.match(r'^[\d\.]', tok):
                 if last_was_operand: raise ValueError(f"Expected operator before '{tok}'")
                 
@@ -68,6 +75,7 @@ class ExpressionParser:
                     num_match = re.match(r'^(\d*\.?\d+)([' + self.p_chars + r'])?$', tok)
                     if num_match:
                         base, pref = num_match.groups()
+                        # CHECK: 'pref' must be prefix is and not part of a variable
                         try:
                             val = float(base) * self.p_map.get(pref, 1)
                             output.append(('num', val))
@@ -140,30 +148,37 @@ class ExpressionParser:
         return output
 
     
-    def eval(self, t_array, postfix=None):
+    def eval(self, var_array=None, postfix=None, verbose=False):
         postfix = postfix or self.postfix
         if not postfix:
             raise ValueError("Empty expression")
         
         stack = []
-        # t, pi en e zijn standaard beschikbaar; self.variables kan ze overschrijven
-        ctx = {**self.variables, 't': t_array, 'pi': np.pi, 'e': np.e}
+        # default_var, pi en e zijn standard available. pi and e can be overwritten.
+        ctx = {**self.variables, 'pi': np.pi, 'e': np.e}
+        if isinstance(var_array, (np.ndarray, float)):
+            ctx[self.default_var] = var_array
+        else:
+            var_array = self.variables[self.default_var]
+
+        if verbose: print("variables:", ctx)
         
         for typ, val in postfix:
+            if verbose: oldstack = stack.copy()
             if typ == 'num':
-                stack.append(np.full_like(t_array, val, dtype=float))
+                stack.append(np.full_like(var_array, val, dtype=float))
             
             elif typ == 'var':
                 if val not in ctx:
                     raise ValueError(f"Unknown variable: '{val}'")
                 v = ctx[val]
-                # Zorg dat variabelen altijd als array terugkomen voor NumPy operaties
-                stack.append(v if isinstance(v, np.ndarray) else np.full_like(t_array, float(v)))
+                # Variables always come back as arrays for Numpy processing
+                stack.append(v if isinstance(v, np.ndarray) else np.full_like(var_array, float(v)))
             
             elif typ == 'op':
                 if val in ('u-', 'u+'):
                     if len(stack) < 1:
-                        # Gebruik de laatste letter van de operatornaam (bijv. '-' uit 'u-')
+                        # Use last character in operator name (bijv. '-' uit 'u-')
                         raise ValueError(f"Missing operand for unary '{val[-1]}'")
                     stack.append(self.ops[val][1](stack.pop()))
                 else:
@@ -177,17 +192,21 @@ class ExpressionParser:
                 if len(stack) < n_args:
                     raise ValueError(f"Missing argument(s) for '{val}'")
                 
-                # Haal argumenten van de stack en draai ze om (stack is LIFO)
+                # Reverse args (stack is LIFO)
                 args = [stack.pop() for _ in range(n_args)][::-1]
                 stack.append(func(*args))
-    
+            if verbose: print("{:} {:}".format(oldstack, val))
+
         # Expression mathematically incomplete
         if len(stack) != 1:
             raise ValueError("Invalid expression")
-            
+        if verbose: print("result {:}".format(stack[0]))
         return stack[0]
 
 if __name__ == "__main__":
-    p = ExpressionParser()
-    p.parse("1kk")
-    print(p.eval(0))
+    p = ExpressionParser(default_var='t')
+    p.variables = {'x': np.array([[1,2,3]]).T, 't': 3.0}
+    p.add_function("atan2", 2, np.atan2)
+    a = p.parse("atan2(456, 456) / pi")
+    print(p.parse("cos(pi-sin(10/(-5/2**3)*t))"))
+    print(p.eval(var_array=3.0, verbose=True))
