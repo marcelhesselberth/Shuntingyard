@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue)
 ![NumPy](https://img.shields.io/badge/dependency-numpy-orange)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Status](https://img.shields.io/badge/status-stable-brightgreen)
 
 A **NumPy‑powered mathematical expression parser and evaluator**
